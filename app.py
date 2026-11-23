@@ -161,6 +161,7 @@ with st.sidebar:
     risk_pct = st.slider("Risiko per transaksi (%)", 0.25, 2.0, 1.0, 0.25)
     max_positions = st.number_input("Maksimum posisi bersamaan", min_value=1, max_value=5, value=2)
     min_score = st.slider("Skor minimum", 0, 100, 60)
+    validate_universe = st.button("🧪 VALIDASI TICKER YAHOO", use_container_width=True)
     run_scan = st.button("🔎 SCAN MARKET", type="primary", use_container_width=True)
     st.caption("Data harian Yahoo Finance/yfinance. Periksa tanggal update; data dapat terlambat atau tidak lengkap.")
 
@@ -200,6 +201,41 @@ st.info(
     "Akumulasi hanya proxy OHLCV (OBV, CMF, volume, posisi penutupan), bukan data broker summary, "
     "foreign flow, atau bukti transaksi bandar. Tidak mengirim order otomatis."
 )
+
+if validate_universe:
+    if universe.empty:
+        st.warning("Universe kosong. Unggah CSV terlebih dahulu.")
+    else:
+        st.subheader("🧪 Validasi ketersediaan data Yahoo Finance")
+        checks = []
+        progress = st.progress(0)
+        status = st.empty()
+        tickers_check = universe["ticker"].dropna().astype(str).unique().tolist()
+        for i, ticker in enumerate(tickers_check):
+            status.write(f"Memeriksa {ticker} ({i+1}/{len(tickers_check)})")
+            try:
+                sample = yf.Ticker(ticker).history(period="10d", interval="1d", auto_adjust=True)
+                ok = sample is not None and not sample.empty and "Close" in sample.columns and sample["Close"].dropna().shape[0] > 0
+                checks.append({"Kode": ticker.replace(".JK", ""), "Ticker Yahoo": ticker,
+                               "Status data": "TERSEDIA" if ok else "TIDAK ADA DATA",
+                               "Tanggal terakhir": sample.index[-1].strftime("%Y-%m-%d") if ok else ""})
+            except Exception as exc:
+                checks.append({"Kode": ticker.replace(".JK", ""), "Ticker Yahoo": ticker,
+                               "Status data": f"ERROR: {type(exc).__name__}", "Tanggal terakhir": ""})
+            progress.progress((i+1)/len(tickers_check))
+            time.sleep(0.08)
+        status.empty()
+        progress.empty()
+        check_df = pd.DataFrame(checks)
+        st.session_state["ticker_validation"] = check_df
+        good = int((check_df["Status data"] == "TERSEDIA").sum())
+        st.metric("Ticker dengan data tersedia", f"{good} / {len(check_df)}")
+
+if "ticker_validation" in st.session_state:
+    vdf = st.session_state["ticker_validation"]
+    st.dataframe(vdf, use_container_width=True, hide_index=True)
+    st.download_button("⬇️ Download hasil validasi ticker", vdf.to_csv(index=False).encode("utf-8"),
+                       file_name="validasi_ticker_yahoo.csv", mime="text/csv")
 
 if run_scan:
     if universe.empty:
@@ -293,6 +329,6 @@ if "scan_results" in st.session_state:
 
 st.divider()
 st.caption(
-    "GOLDEN SMART MONEY AI • Prototype v0.2 • Sinyal bersifat edukatif, bukan rekomendasi investasi. "
+    "GOLDEN SMART MONEY AI • Prototype v0.3 • Sinyal bersifat edukatif, bukan rekomendasi investasi. "
     "Validasi harga, likuiditas, spread, berita, dan tanggal data sebelum transaksi."
 )
